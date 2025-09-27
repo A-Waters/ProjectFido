@@ -24,11 +24,10 @@ public class TerrainChunk : MonoBehaviour
     /// <summary>
     /// Initialize this group and spawn its 3×3 TerrainChunk pieces.
     /// </summary>
-    public void Initialize(Vector2Int groupCoord, TerrainManager terrainManager, string spawnEdge)
+    public void Initialize(Vector2Int groupCoord, TerrainManager terrainManager)
     {
         this.groupCoord = groupCoord;
         this.terrainManager = terrainManager;
-        this.spawnEdge = spawnEdge; // may be null
 
         int groupMapSize = 3 * terrainManager.ChunkStride + 1; // +1 so seams align
 
@@ -57,10 +56,10 @@ public class TerrainChunk : MonoBehaviour
             pieceObj.name = $"Piece_{pieceCoord.x}_{pieceCoord.y}";
 
             var chunk = pieceObj.GetComponent<TerrainPiece>();
-            chunk.InitializeMesh(pieceCoord, terrainManager.chunkSize, terrainManager.noiseScale);
+            chunk.InitializeMesh(pieceCoord, terrainManager.chunkSize, terrainManager.noiseScale, terrainManager.prng);
 
-            // generate raw + save (but not mesh ye
-            chunk.GenerateRawHeightMap();
+
+            chunk.GenerateTerrainMesh();
             //terrainManager.heightMapStorage.SaveGroupMap(groupCoord, groupMap); //THIS LINE
 
             pieces[pieceCoord] = chunk;
@@ -79,39 +78,11 @@ public class TerrainChunk : MonoBehaviour
                 pieceCoord.y - groupCoord.y * 3
             );
 
-            List<string> blendDirs = BuildBlendDirsForPiece(local);
-            chunk.GenerateTerrainMesh(blendDirs);
         }
     }
 
 
-    private List<string> BuildBlendDirsForPiece(Vector2Int local)
-    {
-        var dirs = new List<string>();
-
-
-        // OUTER seam against already-existing groups (ONLY the detected side)
-        if (!string.IsNullOrEmpty(spawnEdge))
-        {
-            switch (spawnEdge)
-            {
-                case "West":
-                    if (local.x == -1) dirs.Add("West");
-                    break;
-                case "East":
-                    if (local.x == 1) dirs.Add("East");
-                    break;
-                case "South":
-                    if (local.y == -1) dirs.Add("South");
-                    break;
-                case "North":
-                    if (local.y == 1) dirs.Add("North");
-                    break;
-            }
-        }
-
-        return dirs;
-    }
+    
 
     /// <summary>
     /// Rebuild every child piece (used when you tweak settings at runtime).
@@ -130,8 +101,7 @@ public class TerrainChunk : MonoBehaviour
                 pieceCoord.y - groupCoord.y * 3
             );
 
-            var blendDirs = BuildBlendDirsForPiece(local);
-            chunk.GenerateTerrainMesh(blendDirs);
+            chunk.GenerateTerrainMesh();
         }
     }
 

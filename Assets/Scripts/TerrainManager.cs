@@ -35,6 +35,12 @@ public class TerrainManager : MonoBehaviour
 
     public float slopeSuppressionStrength;
 
+    private Vector2 globalNoiseOffset;
+
+    [Header("Runtime Noise Scroll")]
+    public Vector2 runtimeNoiseOffset = Vector2.zero; // Added to the global noise offset at runtime
+    public float scrollSpeed = 1f;                   // Units per second for manual input
+
     [Header("Debug")]
     public DebugDirection debugSpawnDirection = DebugDirection.None;
 
@@ -60,39 +66,57 @@ public class TerrainManager : MonoBehaviour
         //Only run in the Editor, not during play mode
         if (Application.isPlaying)
         {
-            //// Clean up existing generated groups so we don't duplicate
-            //foreach (var kvp in groups)
-            //{
-            //    if (kvp.Value != null)
-            //        Destroy(kvp.Value.gameObject);
-            //}
-            //groups.Clear();
-
-            //// Reinitialize seed so noise is consistent with inspector values
-            //InitializeSeed();
-
-            //// Spawn central group again (at origin if no player reference)
-            //var startPos = player != null ? player.position : Vector3.zero;
-            //var startGroup = WorldToGroupCoord(startPos);
-            //CreateChunkGroup(startGroup);
-
-            if (debugSpawnDirection != DebugDirection.None && Application.isPlaying && player != null)
+            // Clean up existing generated groups so we don't duplicate
+            foreach (var kvp in groups)
             {
-                Vector2Int baseGroup = WorldToGroupCoord(player.position);
-                Vector2Int delta = Vector2Int.zero;
+                if (kvp.Value != null)
+                    Destroy(kvp.Value.gameObject);
+            }
+            groups.Clear();
 
-                switch (debugSpawnDirection)
-                {
-                    case DebugDirection.North: delta = new Vector2Int(0, 1); break;
-                    case DebugDirection.South: delta = new Vector2Int(0, -1); break;
-                    case DebugDirection.East: delta = new Vector2Int(1, 0); break;
-                    case DebugDirection.West: delta = new Vector2Int(-1, 0); break;
-                }
+            // Reinitialize seed so noise is consistent with inspector values
+            InitializeSeed();
 
-                Vector2Int targetGroup = baseGroup + delta;
-                CreateChunkGroup(targetGroup);
+            // Spawn central group again (at origin if no player reference)
+            var startPos = player != null ? player.position : Vector3.zero;
+            var startGroup = WorldToGroupCoord(startPos);
+            CreateChunkGroup(startGroup);
 
-                debugSpawnDirection = DebugDirection.None; // reset
+            //if (debugSpawnDirection != DebugDirection.None && Application.isPlaying && player != null)
+            //{
+            //    Vector2Int baseGroup = WorldToGroupCoord(player.position);
+            //    Vector2Int delta = Vector2Int.zero;
+
+            //    switch (debugSpawnDirection)
+            //    {
+            //        case DebugDirection.North: delta = new Vector2Int(0, 1); break;
+            //        case DebugDirection.South: delta = new Vector2Int(0, -1); break;
+            //        case DebugDirection.East: delta = new Vector2Int(1, 0); break;
+            //        case DebugDirection.West: delta = new Vector2Int(-1, 0); break;
+            //    }
+
+            //    Vector2Int targetGroup = baseGroup + delta;
+            //    CreateChunkGroup(targetGroup);
+
+            //    debugSpawnDirection = DebugDirection.None; // reset
+            //}
+        }
+    }
+
+    private void Update()
+    {
+        if (Input.GetAxis("Horizontal") != 0 || Input.GetAxis("Vertical") != 0)
+        {
+            // Simple WASD scroll for debugging
+            float dx = Input.GetAxis("Horizontal") * scrollSpeed * Time.deltaTime;
+            float dz = Input.GetAxis("Vertical") * scrollSpeed * Time.deltaTime;
+
+            runtimeNoiseOffset += new Vector2(dx, dz);
+
+            // If you want to rebuild visible chunks on the fly:
+            foreach (var kvp in groups)
+            {
+                kvp.Value.RegenerateAll();
             }
         }
     }
@@ -130,31 +154,7 @@ public class TerrainManager : MonoBehaviour
     }
 
 
-    public void SpawnNeighbor(DebugDirection direction)
-    {
-        if (!Application.isPlaying || player == null)
-            return;
-
-        // 1. Get the player's current group coordinate
-        Vector2Int baseGroup = WorldToGroupCoord(player.position);
-
-        // 2. Choose an offset based on the requested direction
-        Vector2Int delta = Vector2Int.zero;
-        switch (direction)
-        {
-            case DebugDirection.North: delta = new Vector2Int(0, 1); break;
-            case DebugDirection.South: delta = new Vector2Int(0, -1); break;
-            case DebugDirection.East: delta = new Vector2Int(1, 0); break;
-            case DebugDirection.West: delta = new Vector2Int(-1, 0); break;
-            case DebugDirection.None: return; // no spawn
-        }
-
-        // 3. Add offset to base group  target neighbor
-        Vector2Int targetGroup = baseGroup + delta;
-
-        // 4. Create the chunk group if it doesn’t exist
-        CreateChunkGroup(targetGroup);
-    }
+    
 
     // ---------------- CHUNK GROUP CREATION ----------------
     public TerrainChunk CreateChunkGroup(Vector2Int groupCoord)
@@ -162,13 +162,11 @@ public class TerrainManager : MonoBehaviour
         if (groups.ContainsKey(groupCoord))
             return groups[groupCoord];
 
-        // Detect which outer edge of THIS group should blend
-        string spawnEdge = ComputeGroupSpawnEdge(groupCoord);
 
         GameObject groupObj = new GameObject($"ChunkGroup_{groupCoord.x}_{groupCoord.y}");
         var group = groupObj.AddComponent<TerrainChunk>();
 
-        group.Initialize(groupCoord, this, spawnEdge);
+        group.Initialize(groupCoord, this);
 
         groups.Add(groupCoord, group);
         return group;
@@ -183,14 +181,7 @@ public class TerrainManager : MonoBehaviour
     /// Returns which OUTER edge of the *new* group should blend against existing world.
     /// "West", "East", "North", "South", or null if no neighbor group exists yet.
     /// </summary>
-    public string ComputeGroupSpawnEdge(Vector2Int newGroupCoord)
-    {
-        if (HasGroup(newGroupCoord + Vector2Int.left)) return "West";
-        if (HasGroup(newGroupCoord + Vector2Int.right)) return "East";
-        if (HasGroup(newGroupCoord + Vector2Int.down)) return "South";
-        if (HasGroup(newGroupCoord + Vector2Int.up)) return "North";
-        return null;
-    }
+    
 
     // ---------------- COORD CONVERSIONS ----------------
     public Vector2Int WorldToChunkCoord(Vector3 worldPos)
@@ -236,15 +227,17 @@ public class TerrainManager : MonoBehaviour
         }
 
         prng = new System.Random(seed);
+
+        globalNoiseOffset = new Vector2(
+        (float)prng.NextDouble() * 10000f,
+        (float)prng.NextDouble() * 10000f
+        );
     }
 
     // ---------------- GLOBAL NOISE OFFSET ----------------
     public Vector2 GetGlobalNoiseOffset()
     {
-        var r = new System.Random(seed);
-        float ox = (float)r.NextDouble() * 10000f;
-        float oy = (float)r.NextDouble() * 10000f;
-        return new Vector2(ox, oy);
+        return globalNoiseOffset + runtimeNoiseOffset;
     }
 
     [ContextMenu("Debug Print HeightMap Keys")]
