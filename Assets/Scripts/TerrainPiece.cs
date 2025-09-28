@@ -134,6 +134,9 @@ public class TerrainPiece : MonoBehaviour
         initialized = true;
     }
 
+    
+
+
     // ---------- HEIGHTMAP GENERATION ----------
 
     public float[,] GenerateRawHeightMap()
@@ -183,7 +186,18 @@ public class TerrainPiece : MonoBehaviour
 
                 float height = shaped * terrainManager.heightMultiplier;
 
-                heightMap[x, y] = height;
+                float finalHeight = height;
+
+                if (terrainManager.useFalloff)
+                {
+                    // Apply falloff *after* shaping
+                    float falloff = terrainManager.SampleFalloff(worldX, worldZ);
+
+                    finalHeight *= 1f - falloff;
+                }
+                
+
+                heightMap[x, y] = finalHeight;
             }
         }
 

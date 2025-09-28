@@ -4,62 +4,90 @@ using UnityEngine;
 
 public class TerrainManager : MonoBehaviour
 {
+    // =======================
+    // TERRAIN & PREFAB SETTINGS
+    // =======================
     [Header("Terrain Prefabs & Settings")]
-    public GameObject chunkPrefab;   // Assign your TerrainChunk prefab
-    public int chunkSize = 100;
-    public float noiseScale = 20f;
-    public int ChunkStride => chunkSize - 1;
+    public GameObject chunkPrefab;      // Prefab for a single terrain chunk
+    public int chunkSize = 100;         // Vertices per side of a chunk
+    public float noiseScale = 20f;      // Global scale applied to Perlin noise
+    public int ChunkStride => chunkSize - 1; // Number of units covered by one chunk
 
+    // =======================
+    // FRACTAL NOISE SETTINGS
+    // =======================
     [Header("Noise Settings")]
-    public float frequency = 1f;
-    public float amplitude = 1f;
-    public int octaves = 4;
-    public float lacunarity = 2f;
-    public float persistence = 0.5f;
+    public float frequency = 1f;    // Base frequency for Perlin noise
+    public float amplitude = 1f;    // Base amplitude for noise
+    public int octaves = 4;         // Number of noise layers to sum
+    public float lacunarity = 2f;   // Frequency multiplier per octave
+    public float persistence = 0.5f;// Amplitude multiplier per octave
 
+    // =======================
+    // RANDOMIZATION / SEEDING
+    // =======================
     [Header("Randomization / Seeding")]
-    [Tooltip("Set a fixed seed for deterministic world generation. Leave -1 for a random seed.")]
+    [Tooltip("Set a fixed seed for deterministic generation. Leave -1 for random.")]
     public int seed = -1;
-    public System.Random prng;
+    public System.Random prng;      // Deterministic RNG based on seed
+
     public int GetSeed() => seed;
     public System.Random GetRNG() => prng;
 
-    public float heightMultiplier;
+    // =======================
+    // HEIGHT CONTROL
+    // =======================
+    public float heightMultiplier;           // Multiplies the final terrain height
+    public AnimationCurve heightCurve;       // Optional curve for shaping heights
+    public float minHeight;                  // Not used directly; placeholder
+    public float maxHeight;                  // Not used directly; placeholder
+    public float slopeSuppressionStrength;   // Suppresses high slope noise
 
-    public AnimationCurve heightCurve;
+    public Transform player;                 // Reference to player for central chunk spawning
 
-    public float minHeight;
-    public float maxHeight;
+    private Vector2 globalNoiseOffset;       // Random global offset for deterministic noise
 
-    public Transform player;
+    // =======================
+    // FALLOFF SETTINGS
+    // =======================
+    [Header("Falloff Settings")]
+    public bool useFalloff = true;          // Toggle falloff on/off
+    public int falloffResolution = 256;     // Resolution of the falloff map
+    public float falloffScale = 100f;       // World-space scaling for falloff map
+    public Vector2 falloffScrollOffset;     // Offset to scroll falloff map
+    public float[,] falloffMap;             // Precomputed falloff values
+    public int falloffMapMoveSpeed = 10;    // Speed at which falloff scrolls with input
 
-    public float slopeSuppressionStrength;
-
-    private Vector2 globalNoiseOffset;
-
+    // =======================
+    // NOISE SCROLLING
+    // =======================
     [Header("Runtime Noise Scroll")]
-    public Vector2 runtimeNoiseOffset = Vector2.zero; // Added to the global noise offset at runtime
-    public float scrollSpeed = 1f;                   // Units per second for manual input
+    public Vector2 runtimeNoiseOffset = Vector2.zero; // Scroll offset applied at runtime
+    public float scrollSpeed = 1f;                   // Movement speed for runtime scrolling
 
-    [Header("Debug")]
-    public DebugDirection debugSpawnDirection = DebugDirection.None;
 
-    // Keep track of existing chunk groups
-    private Dictionary<Vector2Int, TerrainChunk> groups = new Dictionary<Vector2Int, TerrainChunk>();
+    // =======================
+    // INTERNAL DATA STRUCTURES
+    // =======================
+    private Dictionary<Vector2Int, TerrainChunk> groups = new(); // Tracks active chunk groups
+    public HeightMapStorage heightMapStorage = new HeightMapStorage(); // Stores raw height maps
+    public int edgeBlendWidth;  // Width of edge blending (for seamless neighbors)
 
-    public HeightMapStorage heightMapStorage = new HeightMapStorage();
-
-    public int edgeBlendWidth;
 
     private void Awake()
     {
         InitializeSeed();
         //CreateChunk(Vector2Int.zero);
 
+        if (falloffMap == null)
+            falloffMap = GenerateFalloffMap(falloffResolution, 3f);
+
         // NEW: spawn the central 3×3 group where the player initially is (or at origin if player null)
         var startPos = player != null ? player.position : Vector3.zero;
         var startGroup = WorldToGroupCoord(startPos);
         CreateChunkGroup(startGroup);
+
+        
     }
     private void OnValidate()
     {
@@ -77,29 +105,15 @@ public class TerrainManager : MonoBehaviour
             // Reinitialize seed so noise is consistent with inspector values
             InitializeSeed();
 
+            if (falloffMap == null)
+                falloffMap = GenerateFalloffMap(falloffResolution, 3f);
+
             // Spawn central group again (at origin if no player reference)
             var startPos = player != null ? player.position : Vector3.zero;
             var startGroup = WorldToGroupCoord(startPos);
             CreateChunkGroup(startGroup);
 
-            //if (debugSpawnDirection != DebugDirection.None && Application.isPlaying && player != null)
-            //{
-            //    Vector2Int baseGroup = WorldToGroupCoord(player.position);
-            //    Vector2Int delta = Vector2Int.zero;
-
-            //    switch (debugSpawnDirection)
-            //    {
-            //        case DebugDirection.North: delta = new Vector2Int(0, 1); break;
-            //        case DebugDirection.South: delta = new Vector2Int(0, -1); break;
-            //        case DebugDirection.East: delta = new Vector2Int(1, 0); break;
-            //        case DebugDirection.West: delta = new Vector2Int(-1, 0); break;
-            //    }
-
-            //    Vector2Int targetGroup = baseGroup + delta;
-            //    CreateChunkGroup(targetGroup);
-
-            //    debugSpawnDirection = DebugDirection.None; // reset
-            //}
+            
         }
     }
 
@@ -118,6 +132,17 @@ public class TerrainManager : MonoBehaviour
             {
                 kvp.Value.RegenerateAll();
             }
+        }
+
+        if (Input.GetKey(KeyCode.I)) falloffScrollOffset.y -= falloffMapMoveSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.K)) falloffScrollOffset.y += falloffMapMoveSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.J)) falloffScrollOffset.x += falloffMapMoveSpeed * Time.deltaTime;
+        if (Input.GetKey(KeyCode.L)) falloffScrollOffset.x -= falloffMapMoveSpeed * Time.deltaTime;
+
+        if (Input.GetKey(KeyCode.I) || Input.GetKey(KeyCode.K) || Input.GetKey(KeyCode.J) || Input.GetKey(KeyCode.L))
+        {
+            foreach (var group in groups.Values)
+                group.RegenerateAll();
         }
     }
 
@@ -144,17 +169,7 @@ public class TerrainManager : MonoBehaviour
             return pieceMaps.ContainsKey(pieceCoord);
         }
     }
-    public enum DebugDirection
-    {
-        None,
-        North,
-        South,
-        East,
-        West
-    }
 
-
-    
 
     // ---------------- CHUNK GROUP CREATION ----------------
     public TerrainChunk CreateChunkGroup(Vector2Int groupCoord)
@@ -197,6 +212,70 @@ public class TerrainManager : MonoBehaviour
         int px = Mathf.FloorToInt(worldPos.x / ChunkStride);
         int pz = Mathf.FloorToInt(worldPos.z / ChunkStride);
         return new Vector2Int(px, pz);
+    }
+
+    public float SampleFalloff(float worldX, float worldZ)
+    {
+        Vector2 center = falloffScrollOffset;
+
+        // Convert world space to normalized [0,1] UV space
+        float nx = (worldX - center.x) / falloffScale + 0.5f;
+        float ny = (worldZ - center.y) / falloffScale + 0.5f;
+
+        // Outside of mask = no suppression (return 1)
+        if (nx < 0f || nx > 1f || ny < 0f || ny > 1f)
+            return 1f;
+
+        // Bilinear interpolation for smooth sampling
+        float fx = nx * (falloffResolution - 1);
+        float fy = ny * (falloffResolution - 1);
+
+        int x0 = Mathf.FloorToInt(fx);
+        int x1 = Mathf.Min(x0 + 1, falloffResolution - 1);
+        int y0 = Mathf.FloorToInt(fy);
+        int y1 = Mathf.Min(y0 + 1, falloffResolution - 1);
+
+        float tx = fx - x0;
+        float ty = fy - y0;
+
+        // Sample 4 nearest pixels and bilerp
+        float c00 = falloffMap[x0, y0];
+        float c10 = falloffMap[x1, y0];
+        float c01 = falloffMap[x0, y1];
+        float c11 = falloffMap[x1, y1];
+
+        float cx0 = Mathf.Lerp(c00, c10, tx);
+        float cx1 = Mathf.Lerp(c01, c11, tx);
+
+        return Mathf.Lerp(cx0, cx1, ty);
+    }
+
+    public float[,] GenerateFalloffMap(int size, float softness = 3f)
+    {
+        float[,] map = new float[size, size];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                // Convert to [-1, 1] range, so center = 0, edge = ±1
+                float nx = (x / (size - 1f)) * 2f - 1f;
+                float ny = (y / (size - 1f)) * 2f - 1f;
+
+                // Distance from center, but circular not square
+                float dist = Mathf.Sqrt(nx * nx + ny * ny);
+
+                // Clamp to [0,1] and apply softness (controls steepness)
+                float t = Mathf.Clamp01(dist);
+                t = Mathf.Pow(t, softness);
+
+                // Smoothstep for gradual fade-out
+                float smooth = t * t * (3f - 2f * t);
+
+                // 0 at center, 1 at edges
+                map[x, y] = smooth;
+            }
+        }
+        return map;
     }
 
     // Piece -> group coordinate (each group is 3×3 pieces)
