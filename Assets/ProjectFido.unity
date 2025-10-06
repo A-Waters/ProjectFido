@@ -149,15 +149,15 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   chunkPrefab: {fileID: 4901326827275886953, guid: 1660e7b9295ca734eb9f7d1a8534e3e6, type: 3}
-  chunkSize: 250
-  noiseScale: 381.4
+  chunkSize: 500
+  noiseScale: 500
   frequency: 2.2
   amplitude: 1.41
   octaves: 8
   lacunarity: 2.5
   persistence: 0.355
-  seed: -1
-  heightMultiplier: 428.6
+  seed: -550037986
+  heightMultiplier: 423
   heightCurve:
     serializedVersion: 2
     m_Curve:
@@ -193,11 +193,23 @@ MonoBehaviour:
     m_RotationOrder: 4
   minHeight: -286.3
   maxHeight: 74
-  player: {fileID: 0}
   slopeSuppressionStrength: 2
-  runtimeNoiseOffset: {x: 0, y: 0}
+  player: {fileID: 0}
+  useFalloff: 1
+  falloffResolution: 256
+  falloffScale: 300
+  falloffScrollOffset: {x: 99.05325, y: 73.33334}
+  falloffMapMoveSpeed: 11
+  outsideSoftness: 0.47
+  edgeSuppression: 1
+  transitionWidth: 0.38
+  outsideRecoveryDistance: 5.49
+  squiggleScale: 0
+  squiggleStrength: 0
+  squiggleNoiseOffsetX: 0
+  squiggleNoiseOffsetY: 0
+  runtimeNoiseOffset: {x: 640.5104, y: 1003.334}
   scrollSpeed: 30.5
-  debugSpawnDirection: 0
   edgeBlendWidth: 0
 --- !u!4 &504467435
 Transform:

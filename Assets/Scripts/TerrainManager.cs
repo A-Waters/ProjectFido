@@ -57,6 +57,14 @@ public class TerrainManager : MonoBehaviour
     public Vector2 falloffScrollOffset;     // Offset to scroll falloff map
     public float[,] falloffMap;             // Precomputed falloff values
     public int falloffMapMoveSpeed = 10;    // Speed at which falloff scrolls with input
+    public float outsideSoftness = 0.5f;       // Suppression level far away
+    public float edgeSuppression = 0.3f;       // Extra suppression right outside radius
+    public float transitionWidth = 0.2f;       // How thick the "flat ring" around edge is
+    public float outsideRecoveryDistance = 1f; // How far to recover back to 1
+    public float squiggleScale;
+    public float squiggleStrength;
+    public float squiggleNoiseOffsetX;
+    public float squiggleNoiseOffsetY;
 
     // =======================
     // NOISE SCROLLING
@@ -219,35 +227,64 @@ public class TerrainManager : MonoBehaviour
         Vector2 center = falloffScrollOffset;
 
         // Convert world space to normalized [0,1] UV space
-        float nx = (worldX - center.x) / falloffScale + 0.5f;
-        float ny = (worldZ - center.y) / falloffScale + 0.5f;
+        float nx = (worldX - center.x) / falloffScale;
+        float ny = (worldZ - center.y) / falloffScale;
 
-        // Outside of mask = no suppression (return 1)
-        if (nx < 0f || nx > 1f || ny < 0f || ny > 1f)
-            return 1f;
+        // Radial distance from center (0 at center, 1 = edge of map)
+        float dist = Mathf.Sqrt(nx * nx + ny * ny);
 
-        // Bilinear interpolation for smooth sampling
-        float fx = nx * (falloffResolution - 1);
-        float fy = ny * (falloffResolution - 1);
+        // Angle-based lookup
+        float angle = Mathf.Atan2(ny, nx);
 
-        int x0 = Mathf.FloorToInt(fx);
-        int x1 = Mathf.Min(x0 + 1, falloffResolution - 1);
-        int y0 = Mathf.FloorToInt(fy);
-        int y1 = Mathf.Min(y0 + 1, falloffResolution - 1);
+        // Sample noise in angular space
+        float noise = Mathf.PerlinNoise(
+            Mathf.Cos(angle) * squiggleScale + squiggleNoiseOffsetX,
+            Mathf.Sin(angle) * squiggleScale + squiggleNoiseOffsetY
+        );
 
-        float tx = fx - x0;
-        float ty = fy - y0;
+        // Perturb the distance (wiggly edge)
+        float perturbedDist = dist / (1f + (noise - 0.5f) * squiggleStrength);
 
-        // Sample 4 nearest pixels and bilerp
-        float c00 = falloffMap[x0, y0];
-        float c10 = falloffMap[x1, y0];
-        float c01 = falloffMap[x0, y1];
-        float c11 = falloffMap[x1, y1];
+        if (perturbedDist <= 1f)
+        {
+            // Bilinear interpolation for smooth sampling
+            float uvx = (nx * 0.5f + 0.5f) * (falloffResolution - 1);
+            float uvy = (ny * 0.5f + 0.5f) * (falloffResolution - 1);
 
-        float cx0 = Mathf.Lerp(c00, c10, tx);
-        float cx1 = Mathf.Lerp(c01, c11, tx);
+            int x0 = Mathf.FloorToInt(uvx);
+            int x1 = Mathf.Min(x0 + 1, falloffResolution - 1);
+            int y0 = Mathf.FloorToInt(uvy);
+            int y1 = Mathf.Min(y0 + 1, falloffResolution - 1);
 
-        return Mathf.Lerp(cx0, cx1, ty);
+            float tx = uvx - x0;
+            float ty = uvy - y0;
+
+            // Sample 4 nearest pixels and bilerp
+            float c00 = falloffMap[x0, y0];
+            float c10 = falloffMap[x1, y0];
+            float c01 = falloffMap[x0, y1];
+            float c11 = falloffMap[x1, y1];
+
+            float cx0 = Mathf.Lerp(c00, c10, tx);
+            float cx1 = Mathf.Lerp(c01, c11, tx);
+
+            return Mathf.Lerp(cx0, cx1, ty);
+        }
+        else if (dist <= 1f + transitionWidth)
+        {
+            // Transition ring just outside the radius
+            float t = (dist - 1f) / transitionWidth;
+            return Mathf.Lerp(edgeSuppression, outsideSoftness, t);
+        }
+        else
+        {
+            // Farther out: gradually recover to full terrain
+            float t = (dist - (1f + transitionWidth)) / outsideRecoveryDistance;
+            t = Mathf.Clamp01(t);
+            return Mathf.Lerp(outsideSoftness, 1f, t);
+        }
+
+
     }
 
     public float[,] GenerateFalloffMap(int size, float softness = 3f)
